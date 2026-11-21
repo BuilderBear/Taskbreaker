@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Launchpad focus tools</title>
+<title>Taskbreaker focus tools</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -113,7 +113,7 @@ li.cur .txt{color:var(--lime)}
 <body>
 <header class="top">
   <div class="wrap">
-    <div class="brand">LAUNCHPAD<span> //</span></div>
+    <div class="brand">TASKBREAKER<span> //</span></div>
     <nav aria-label="Pages">
       <a href="#timer" id="tabT">Timer <span class="mini" id="miniT"></span></a>
       <a href="#breakdown" id="tabB">Breakdown</a>
@@ -193,6 +193,7 @@ li.cur .txt{color:var(--lime)}
 {
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Saved-data keys keep the old "lp." prefix (from the app's earlier name, Launchpad) so existing saved steps and timer settings aren't lost. */
 const store={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const calm=matchMedia('(prefers-reduced-motion:reduce)').matches;
 
@@ -232,7 +233,7 @@ function render(){
   $('#readout').textContent=fmt(remain);
   $('#go').textContent=running?'Pause':(remain<total&&remain>0?'Resume':'Start');
   $('#miniT').textContent=running?fmt(remain):'';
-  document.title=running?fmt(remain)+' · Launchpad':'Launchpad focus tools';
+  document.title=running?fmt(remain)+' · Taskbreaker':'Taskbreaker focus tools';
   document.querySelectorAll('#presets button').forEach(b=>b.classList.toggle('on',+b.dataset.m*60===total));
 }
 function audio(){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume()}catch(e){}}

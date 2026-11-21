@@ -1,11 +1,11 @@
-# AGENTS.md — Launchpad
+# AGENTS.md — Taskbreaker
 
 Instructions for AI coding agents (Claude, Codex, Copilot, Cursor, etc.) working in this project.
 Read this whole file before making changes, and keep it up to date when the stack, commands or conventions change.
 
 ## What this project is
 
-Launchpad is a personal web app for daily life management. It brings several small tools together in one place:
+Taskbreaker is a personal web app for daily life management. It brings several small tools together in one place:
 
 | Tool | Status | Notes |
 |---|---|---|
@@ -25,10 +25,10 @@ Out of scope for now: finding misplaced items ("where's my stuff").
 
 ## Current state of the code
 
-Everything lives in one file today: **`launchpad.html`** (plain HTML, CSS and JavaScript, no build step, no dependencies).
+Everything lives in one file today: **`taskbreaker.html`** (plain HTML, CSS and JavaScript, no build step, no dependencies).
 
 - **Pages:** hash routes inside the one file. `#timer` shows the Focus timer, `#breakdown` shows the Task breaker. The `route()` function shows and hides the two `<section class="view">` blocks.
-- **Saved data:** browser `localStorage`, under the keys `lp.timer` (last timer length) and `lp.steps` (the current task and its steps). Access always goes through the `store` helper, which fails quietly if storage is blocked. Nothing leaves the device.
+- **Saved data:** browser `localStorage`, under the keys `lp.timer` (last timer length) and `lp.steps` (the current task and its steps). The `lp.` prefix is left over from the old name, Launchpad. Keep it, because changing it would make the app forget saved data. Access always goes through the `store` helper, which fails quietly if storage is blocked. Nothing leaves the device.
 - **Timer:** counts against a fixed end time (`endAt`) instead of counting ticks, so it stays accurate if the phone throttles the page. When time runs out it plays a chime (Web Audio) and vibrates.
 - **Task breaker AI:** the "Break it down" button calls `window.claude.use('sample')`. That API only exists when the page is hosted as a claude.ai artifact. Opened anywhere else, the page shows a clear "not available" message and the owner can still add steps by hand. **If the app moves to self-hosting, this needs a replacement** (for example a small backend that calls an AI API with a key kept in `.env`). Ask the owner before choosing one.
 - **Fonts:** Chakra Petch and Rajdhani from Google Fonts.
@@ -44,7 +44,7 @@ When the app grows past this single file (medication, planner), propose a folder
 ## Design / look and feel
 
 - **Cyberpunk HUD theme:** black and graphite backgrounds, glowing **lime-green accents** on buttons, highlights and active states, one hot magenta for alerts. Angled (clipped) corners on buttons and panels, faint grid and scanline overlay.
-- All colors are CSS variables in the `:root` block at the top of `launchpad.html`. Use those variables; don't hard-code new colors. Current tokens:
+- All colors are CSS variables in the `:root` block at the top of `taskbreaker.html`. Use those variables; don't hard-code new colors. Current tokens:
   - `--bg: #07080a`, `--panel: #111316`, `--panel2: #181b1f`, `--line: #2a2f35` (borders)
   - `--ink: #e8ece6` (text), `--muted: #8a929a` (secondary text)
   - `--lime: #c6ff00` (accent), `--lime2: #8fbf00` (dim accent), `--hot: #ff2e88` (alerts)
@@ -60,14 +60,14 @@ When the app grows past this single file (medication, planner), propose a folder
 
 ## Tech stack
 
-- Frontend: plain HTML, CSS and JavaScript in `launchpad.html`. No framework yet. **Ask before adding one.**
+- Frontend: plain HTML, CSS and JavaScript in `taskbreaker.html`. No framework yet. **Ask before adding one.**
 - Backend / data storage: none yet. Data is in the browser's `localStorage`. (Firebase was mentioned as an option; not decided.)
 - Hosting: none yet. Candidates are a local home server and Cloudflare.
 
 ## Commands
 
 - Install dependencies: none needed.
-- Run locally: double-click `launchpad.html` to open it in a browser. For phone testing or Web NFC you'll need to serve it over `https://` or `localhost`. Ask before adding a local server tool.
+- Run locally: double-click `taskbreaker.html` to open it in a browser. For phone testing or Web NFC you'll need to serve it over `https://` or `localhost`. Ask before adding a local server tool.
 - Run tests: no automated tests yet. Test by hand in Chrome on desktop and on the Android phone.
 
 ## Rules for agents
