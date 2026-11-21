@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only used before Compose draws (launch screen, app icon). App colors live in ui/Theme.kt. -->
+    <color name="tb_bg">#FF07080A</color>
+    <color name="tb_lime">#FFC6FF00</color>
+</resources>

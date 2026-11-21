@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App icon: a lime timer wedge inside a ring, like the focus timer dial.
+     Drawn on a 108x108 grid; the middle 66x66 is what launchers always show. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- outer ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF2A2F35"
+        android:strokeWidth="3"
+        android:pathData="M54,25 A29,29 0 1,1 53.99,25 Z" />
+    <!-- lime wedge: three quarters of the dial, starting at 12 o'clock -->
+    <path
+        android:fillColor="#FFC6FF00"
+        android:pathData="M54,54 L54,31 A23,23 0 1,1 31,54 Z" />
+    <!-- centre hub -->
+    <path
+        android:fillColor="#FF07080A"
+        android:pathData="M54,47 A7,7 0 1,1 53.99,47 Z" />
+</vector>

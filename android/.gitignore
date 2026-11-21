@@ -1,0 +1,11 @@
+# Build output and per-machine files that Android Studio and Gradle create. Never commit these.
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/

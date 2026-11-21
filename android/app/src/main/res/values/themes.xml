@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window background so there's no white flash while the app starts. -->
+    <style name="Theme.Taskbreaker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tb_bg</item>
+        <item name="android:statusBarColor">@color/tb_bg</item>
+        <item name="android:navigationBarColor">@color/tb_bg</item>
+    </style>
+</resources>

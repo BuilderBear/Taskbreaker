@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Needed to reach the Claude API for "Break it down". -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ asks the user before an app may show notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Exact alarms make the timer alert fire on time even when the phone is asleep.
+         USE_EXACT_ALARM is granted automatically to timer/alarm apps on Android 13+;
+         SCHEDULE_EXACT_ALARM covers Android 12 and 12L. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+
+    <!-- allowBackup=false keeps the saved API key out of Google's automatic cloud backups. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Taskbreaker">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Woken up by the system alarm when the focus timer runs out. -->
+        <receiver
+            android:name=".timer.TimerAlarmReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
