@@ -2,22 +2,15 @@ package com.builderbear.taskbreaker.timer
 
 import android.Manifest
 import android.content.Intent
-import android.graphics.BlurMaskFilter
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -38,15 +31,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
@@ -58,10 +42,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.builderbear.taskbreaker.R
 import com.builderbear.taskbreaker.ui.FieldShape
 import com.builderbear.taskbreaker.ui.Panel
 import com.builderbear.taskbreaker.ui.PrimaryButton
@@ -73,10 +55,8 @@ import com.builderbear.taskbreaker.ui.TbType
 import com.builderbear.taskbreaker.ui.tbFieldColors
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
 
 private val PRESETS = listOf(5, 10, 15, 25, 45)
 
@@ -154,23 +134,36 @@ fun TimerScreen(
             }
         }
 
-        val fraction = remaining / 1000f / max(3600, s.totalSec)
+        // While a finger is dragging the dial, show that value instead of the saved one.
+        // It's only saved (vm.setLength) when the finger lifts, so storage isn't written on every pixel.
+        var dragMinutes by remember { mutableStateOf<Int?>(null) }
+        val shownMs = dragMinutes?.let { it * 60_000L } ?: remaining
+
         // Like the web's min(100%, 520px, 62vh): cap the dial so the readout and Start button stay on screen.
         val maxDial = (LocalConfiguration.current.screenHeightDp * 0.42f).dp
         TimerDial(
-            fraction = fraction,
-            finished = s.finished,
+            minutes = shownMs / 60_000f,
+            finished = s.finished && dragMinutes == null,
+            // Dragging is off while the timer runs, so a stray finger can't wreck a countdown. Pause first.
+            draggable = !s.running,
+            onDragMinutes = { dragMinutes = it },
+            onDragEnd = {
+                dragMinutes?.let { vm.setLength(max(1, it)) }
+                dragMinutes = null
+            },
             modifier = Modifier.widthIn(max = minOf(maxDial, 420.dp)).fillMaxWidth(),
         )
 
         // tnum = "tabular numbers": every digit is the same width, so the readout doesn't jiggle as it counts.
-        Text(formatTime(remaining), style = TbType.readout.copy(fontFeatureSettings = "tnum"), maxLines = 1)
+        Text(formatTime(shownMs), style = TbType.readout.copy(fontFeatureSettings = "tnum"), maxLines = 1)
         Text(
             buildAnnotatedString {
                 val bold = SpanStyle(color = TbColors.Ink, fontWeight = FontWeight.Bold)
                 when {
+                    dragMinutes != null -> append("Lift your finger to set it.")
                     s.finished -> { withStyle(bold) { append("Time's up.") }; append(" Nice work.") }
                     s.label.isNotBlank() -> { append("Objective: "); withStyle(bold) { append(s.label) } }
+                    !s.running -> append("Drag the dial to set the time.")
                 }
             },
             color = TbColors.Muted,
@@ -208,6 +201,8 @@ fun TimerScreen(
 
         // Custom length
         var custom by rememberSaveable { mutableStateOf((s.totalSec / 60).toString()) }
+        // Keep the box in step when the length changes some other way (dragging the dial, a preset).
+        LaunchedEffect(s.totalSec) { custom = (s.totalSec / 60).toString() }
         // Web layout: CUSTOM [ 25 ] min [SET]
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionLabel("Custom", style = TbType.label.copy(fontSize = 14.sp, letterSpacing = 0.06.em))
@@ -234,114 +229,4 @@ fun formatTime(ms: Long): String {
     val m = total % 3600 / 60
     val sec = total % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%02d:%02d".format(m, sec)
-}
-
-/**
- * The glowing dial. Sizes are in the same units as the web version's SVG (a 260-unit-wide box),
- * scaled to whatever size the screen gives us.
- */
-@Composable
-fun TimerDial(fraction: Float, finished: Boolean, modifier: Modifier = Modifier) {
-    // When time is up the wedge pulses 5 times, then stops (like the web version), unless the
-    // phone's "remove animations" accessibility setting is on.
-    val pulse = remember { Animatable(1f) }
-    val context = LocalContext.current
-    val reduceMotion = remember {
-        android.provider.Settings.Global.getFloat(
-            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
-        ) == 0f
-    }
-    LaunchedEffect(finished) {
-        pulse.snapTo(1f)
-        if (finished && !reduceMotion) {
-            repeat(5) {
-                pulse.animateTo(0.2f, tween(450))
-                pulse.animateTo(1f, tween(450))
-            }
-        }
-    }
-    val blink = pulse.value
-
-    // Tick numbers in Chakra Petch, like the web dial.
-    val numberFont = remember { ResourcesCompat.getFont(context, R.font.chakra_petch_bold) ?: Typeface.DEFAULT_BOLD }
-
-    Canvas(modifier.aspectRatio(1f)) {
-        val c = center
-        val unit = size.minDimension / 260f
-        fun r(v: Float) = v * unit
-        fun point(radius: Float, angleRad: Double) =
-            Offset(c.x + r(radius) * sin(angleRad).toFloat(), c.y - r(radius) * cos(angleRad).toFloat())
-
-        // Rings
-        drawCircle(Color(0xFF1D2126), r(118f), c, style = Stroke(width = unit))
-        drawCircle(
-            if (finished) TbColors.Hot else TbColors.Line,
-            r(112f),
-            c,
-            style = Stroke(width = 3 * unit, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14 * unit, 6 * unit))),
-        )
-        drawCircle(
-            Brush.radialGradient(listOf(Color(0xFF161A10), Color(0xFF0A0B0C)), center = c, radius = r(94f)),
-            r(94f),
-            c,
-        )
-        drawCircle(TbColors.Line, r(94f), c, style = Stroke(width = unit))
-
-        // Minute ticks, with a number every 5
-        val labelPaint = Paint().apply {
-            color = TbColors.Muted.toArgb()
-            textSize = 10 * unit
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-            typeface = numberFont
-        }
-        for (i in 0 until 60) {
-            val a = Math.toRadians(i * 6.0)
-            val big = i % 5 == 0
-            drawLine(
-                color = if (big) TbColors.Lime.copy(alpha = 0.8f) else Color(0xFF4A525A),
-                start = point(if (big) 82f else 88f, a),
-                end = point(94f, a),
-                strokeWidth = (if (big) 1.8f else 0.8f) * unit,
-            )
-            if (big) {
-                val p = point(103f, a)
-                drawIntoCanvas { it.nativeCanvas.drawText("%02d".format(i), p.x, p.y + 3.5f * unit, labelPaint) }
-            }
-        }
-
-        // The lime wedge of remaining time: a thick arc between radius 34 and 80, clockwise from 12 o'clock.
-        val f = min(1f, max(0f, fraction))
-        if (f > 0f) {
-            val mid = r(57f)
-            val topLeft = Offset(c.x - mid, c.y - mid)
-            val arcSize = Size(mid * 2, mid * 2)
-            val sweep = 360f * f
-            // Glow first: the web uses drop-shadow(0 0 6px lime/70%) + drop-shadow(0 0 18px lime/35%).
-            // A blurred copy of the wedge does the same. Blur needs Android 9+, so older phones get a soft halo instead.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                drawIntoCanvas { canvas ->
-                    val oval = android.graphics.RectF(topLeft.x, topLeft.y, topLeft.x + arcSize.width, topLeft.y + arcSize.height)
-                    listOf(18f to 0.35f, 6f to 0.7f).forEach { (blur, alpha) ->
-                        val glow = Paint().apply {
-                            isAntiAlias = true
-                            style = Paint.Style.STROKE
-                            strokeWidth = r(46f)
-                            color = TbColors.Lime.copy(alpha = alpha * blink).toArgb()
-                            maskFilter = BlurMaskFilter(blur * unit, BlurMaskFilter.Blur.NORMAL)
-                        }
-                        canvas.nativeCanvas.drawArc(oval, -90f, sweep, false, glow)
-                    }
-                }
-            } else {
-                drawArc(TbColors.Lime, -90f, sweep, false, topLeft, arcSize, alpha = 0.25f * blink, style = Stroke(width = r(54f)))
-            }
-            drawArc(TbColors.Lime, -90f, sweep, false, topLeft, arcSize, alpha = blink, style = Stroke(width = r(46f)))
-        }
-
-        // Hub
-        drawCircle(TbColors.Bg, r(30f), c)
-        drawCircle(TbColors.Line, r(30f), c, style = Stroke(width = unit))
-        drawCircle(TbColors.Lime, r(6f), c)
-    }
 }

@@ -82,8 +82,19 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     /** Sets a new length. Stops any running countdown. */
     fun setTimer(minutes: Int, label: String = "", linkedStep: Int? = null) {
         TimerAlarm.cancel(context)
-        val total = minutes.coerceIn(1, 240) * 60
+        val total = minutes.coerceIn(1, MAX_MINUTES) * 60
         update(TimerState(totalSec = total, remainingMs = total * 1000L, label = label, linkedStep = linkedStep))
+    }
+
+    /** Changes the length but keeps the current step label and link (used when dragging the dial). */
+    fun setLength(minutes: Int) {
+        val s = _state.value
+        setTimer(minutes, s.label, s.linkedStep)
+    }
+
+    companion object {
+        /** Longest timer allowed: 12 hours (12 laps of the dial). */
+        const val MAX_MINUTES = 12 * 60
     }
 
     fun reset() {

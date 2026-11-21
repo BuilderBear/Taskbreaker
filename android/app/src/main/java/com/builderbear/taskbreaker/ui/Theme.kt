@@ -39,6 +39,17 @@ object TbColors {
     val Hot = Color(0xFFFF2E88)      // alerts and warnings
 }
 
+/**
+ * Color of each hour "lap" on the timer dial. Hour 1 is the normal lime; each extra hour that
+ * overlaps it is lighter (blended further toward white), so 2h40m shows a lighter band over the
+ * first 40 minutes. Every step closes 38% of the remaining gap to white, so laps never quite
+ * reach pure white and each one stays distinguishable from the last.
+ */
+fun limeLayer(hour: Int): Color {
+    val towardWhite = 1f - Math.pow(0.62, (hour - 1).coerceAtLeast(0).toDouble()).toFloat()
+    return androidx.compose.ui.graphics.lerp(TbColors.Lime, Color.White, towardWhite)
+}
+
 /* The same two fonts as the web version, bundled in res/font (SIL Open Font License, see android/fonts-license). */
 
 /** Headings, buttons, labels and numbers: squared-off "tech" letters. */
