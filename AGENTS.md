@@ -95,6 +95,7 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
   - Start it: `& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd Taskbreaker_Pixel`
   - Install the app on it: `.\gradlew.bat installDebug` (from `android\`, with `JAVA_HOME` set as above)
   - Screenshot for checking layouts: `adb shell screencap -p /sdcard/s.png` then `adb pull /sdcard/s.png` (adb is in `%LOCALAPPDATA%\Android\Sdk\platform-tools`)
+- Releases: follow `.claude/skills/cut-release/SKILL.md` (version bump, APK build, tag, GitHub pre-release with the APK). Always give the owner the link to the new release page.
 - Tests: no automated tests yet. Check UI changes on the emulator with screenshots, then on the real phone.
 - Windows gotcha: when calling `.bat` tools (like `sdkmanager.bat`) from PowerShell, arguments containing `;` get split. Run them through `cmd /c "..."` instead.
 
