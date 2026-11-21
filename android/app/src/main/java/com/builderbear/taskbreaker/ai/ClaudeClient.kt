@@ -26,7 +26,8 @@ class FriendlyError(message: String) : Exception(message)
  * (the ViewModel does that). Running it on the main thread would freeze the screen.
  */
 object ClaudeClient {
-    const val MODEL = "claude-opus-5-5"
+    // Haiku is Anthropic's fastest, cheapest model, plenty for writing a short list of steps.
+    const val MODEL = "claude-haiku-5-5"
 
     val STUCK_LEVELS = listOf("A little", "Somewhat", "Pretty stuck", "Very stuck", "Totally frozen")
 
