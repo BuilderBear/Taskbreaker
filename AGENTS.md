@@ -62,7 +62,13 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
   - `Bg #07080A`, `Panel #111316`, `Panel2 #181B1F`, `Line #2A2F35` (borders), `Field #0B0D0F`
   - `Ink #E8ECE6` (text), `Muted #8A929A` (secondary text), `Faint #5D656C`
   - `Lime #C6FF00` (accent), `Lime2 #8FBF00` (dim accent), `Hot #FF2E88` (alerts)
-- Use the shared `PrimaryButton`, `SecondaryButton` and `Panel` from `ui/Components.kt` so everything matches.
+- The Android app copies the web look exactly. Reuse these pieces instead of re-creating them:
+  - **Fonts:** `ChakraPetch` (headings, buttons, labels, numbers) and `Rajdhani` (body text), bundled in `res/font` under the SIL Open Font License (license files in `android/fonts-license/`). Shared text styles are in `TbType`.
+  - **Shapes:** `hudShape(cut)` cuts only the top-left and bottom-right corners, like the web's clip-path. Text fields are square (`FieldShape`).
+  - **Glow:** `Modifier.limeGlow(shape)` for glowing things, `TbGlow.text` for glowing text.
+  - **Background:** `Modifier.hudBackground()` (grid + top glow) and `ScanlineOverlay()` (on top of everything), both in `ui/Background.kt`.
+  - **Components:** `PrimaryButton`, `SecondaryButton` and `Panel` (with `accent = true` for the objective card's lime bar) in `ui/Components.kt`.
+- Tabs sit at the bottom for one-handed use, styled like the web's top tabs.
 - Keep text readable: aim for WCAG AA contrast. Tap targets at least 48×48 dp.
 - Each tool gets its **own page**.
 
@@ -84,7 +90,11 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
   - `$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"`
   - `.\gradlew.bat assembleDebug` → builds `app\build\outputs\apk\debug\app-debug.apk`
 - Run on the phone: open the `android/` folder in Android Studio, plug in the phone with USB debugging on (or use an emulator), and press the green **Run** button. Or, from the terminal, `.\gradlew.bat installDebug`.
-- Tests: no automated tests yet. Test by hand on the phone.
+- Virtual phone (emulator): a Pixel 8 running Android 16, named `Taskbreaker_Pixel`. It uses Windows' hypervisor (WHPX) for speed.
+  - Start it: `& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd Taskbreaker_Pixel`
+  - Install the app on it: `.\gradlew.bat installDebug` (from `android\`, with `JAVA_HOME` set as above)
+  - Screenshot for checking layouts: `adb shell screencap -p /sdcard/s.png` then `adb pull /sdcard/s.png` (adb is in `%LOCALAPPDATA%\Android\Sdk\platform-tools`)
+- Tests: no automated tests yet. Check UI changes on the emulator with screenshots, then on the real phone.
 - Windows gotcha: when calling `.bat` tools (like `sdkmanager.bat`) from PowerShell, arguments containing `;` get split. Run them through `cmd /c "..."` instead.
 
 ## Rules for agents

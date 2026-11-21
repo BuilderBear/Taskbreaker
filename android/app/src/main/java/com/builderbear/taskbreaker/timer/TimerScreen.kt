@@ -2,16 +2,14 @@ package com.builderbear.taskbreaker.timer
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.BlurMaskFilter
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -22,10 +20,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,20 +47,29 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.builderbear.taskbreaker.R
+import com.builderbear.taskbreaker.ui.FieldShape
 import com.builderbear.taskbreaker.ui.Panel
 import com.builderbear.taskbreaker.ui.PrimaryButton
 import com.builderbear.taskbreaker.ui.ScreenTitle
 import com.builderbear.taskbreaker.ui.SecondaryButton
+import com.builderbear.taskbreaker.ui.SectionLabel
 import com.builderbear.taskbreaker.ui.TbColors
+import com.builderbear.taskbreaker.ui.TbType
 import com.builderbear.taskbreaker.ui.tbFieldColors
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
@@ -120,7 +129,7 @@ fun TimerScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        ScreenTitle("Focus timer", "Watch the green drain. That's all you have to do.")
+        ScreenTitle("Focus timer", "Watch the green drain. That's all you have to do.", centered = true)
 
         // Reminders must never fail silently: say so plainly if the alert can't reach the user.
         if (!canNotify) {
@@ -146,28 +155,28 @@ fun TimerScreen(
         }
 
         val fraction = remaining / 1000f / max(3600, s.totalSec)
+        // Like the web's min(100%, 520px, 62vh): cap the dial so the readout and Start button stay on screen.
+        val maxDial = (LocalConfiguration.current.screenHeightDp * 0.42f).dp
         TimerDial(
             fraction = fraction,
             finished = s.finished,
-            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            modifier = Modifier.widthIn(max = minOf(maxDial, 420.dp)).fillMaxWidth(),
         )
 
+        // tnum = "tabular numbers": every digit is the same width, so the readout doesn't jiggle as it counts.
+        Text(formatTime(remaining), style = TbType.readout.copy(fontFeatureSettings = "tnum"), maxLines = 1)
         Text(
-            formatTime(remaining),
-            color = TbColors.Lime,
-            fontSize = 72.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text(
-            when {
-                s.finished -> "Time's up. Nice work."
-                s.label.isNotBlank() -> "Objective: ${s.label}"
-                else -> ""
+            buildAnnotatedString {
+                val bold = SpanStyle(color = TbColors.Ink, fontWeight = FontWeight.Bold)
+                when {
+                    s.finished -> { withStyle(bold) { append("Time's up.") }; append(" Nice work.") }
+                    s.label.isNotBlank() -> { append("Objective: "); withStyle(bold) { append(s.label) } }
+                }
             },
-            color = if (s.finished) TbColors.Ink else TbColors.Muted,
+            color = TbColors.Muted,
             textAlign = TextAlign.Center,
             fontSize = 18.sp,
+            modifier = Modifier.widthIn(max = 360.dp),
         )
 
         val linked = s.linkedStep
@@ -199,17 +208,21 @@ fun TimerScreen(
 
         // Custom length
         var custom by rememberSaveable { mutableStateOf((s.totalSec / 60).toString()) }
+        // Web layout: CUSTOM [ 25 ] min [SET]
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionLabel("Custom", style = TbType.label.copy(fontSize = 14.sp, letterSpacing = 0.06.em))
             OutlinedTextField(
                 value = custom,
                 onValueChange = { custom = it.filter(Char::isDigit).take(3) },
-                label = { Text("Custom min") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center),
                 colors = tbFieldColors(),
-                modifier = Modifier.widthIn(max = 140.dp),
+                shape = FieldShape,
+                modifier = Modifier.width(90.dp),
             )
-            SecondaryButton("Set", onClick = { vm.setTimer(custom.toIntOrNull() ?: 25) })
+            Text("min", color = TbColors.Muted)
+            SecondaryButton("Set", onClick = { vm.setTimer(custom.toIntOrNull() ?: 25) }, compact = true)
         }
     }
 }
@@ -229,11 +242,28 @@ fun formatTime(ms: Long): String {
  */
 @Composable
 fun TimerDial(fraction: Float, finished: Boolean, modifier: Modifier = Modifier) {
-    // When time is up, the wedge area blinks.
-    val blink = if (finished) {
-        val t = rememberInfiniteTransition(label = "blink")
-        t.animateFloat(1f, 0.2f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "blinkAlpha").value
-    } else 1f
+    // When time is up the wedge pulses 5 times, then stops (like the web version), unless the
+    // phone's "remove animations" accessibility setting is on.
+    val pulse = remember { Animatable(1f) }
+    val context = LocalContext.current
+    val reduceMotion = remember {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+        ) == 0f
+    }
+    LaunchedEffect(finished) {
+        pulse.snapTo(1f)
+        if (finished && !reduceMotion) {
+            repeat(5) {
+                pulse.animateTo(0.2f, tween(450))
+                pulse.animateTo(1f, tween(450))
+            }
+        }
+    }
+    val blink = pulse.value
+
+    // Tick numbers in Chakra Petch, like the web dial.
+    val numberFont = remember { ResourcesCompat.getFont(context, R.font.chakra_petch_bold) ?: Typeface.DEFAULT_BOLD }
 
     Canvas(modifier.aspectRatio(1f)) {
         val c = center
@@ -263,7 +293,7 @@ fun TimerDial(fraction: Float, finished: Boolean, modifier: Modifier = Modifier)
             textSize = 10 * unit
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            typeface = numberFont
         }
         for (i in 0 until 60) {
             val a = Math.toRadians(i * 6.0)
@@ -287,8 +317,25 @@ fun TimerDial(fraction: Float, finished: Boolean, modifier: Modifier = Modifier)
             val topLeft = Offset(c.x - mid, c.y - mid)
             val arcSize = Size(mid * 2, mid * 2)
             val sweep = 360f * f
-            // soft glow behind, then the solid wedge
-            drawArc(TbColors.Lime, -90f, sweep, false, topLeft, arcSize, alpha = 0.25f * blink, style = Stroke(width = r(52f)))
+            // Glow first: the web uses drop-shadow(0 0 6px lime/70%) + drop-shadow(0 0 18px lime/35%).
+            // A blurred copy of the wedge does the same. Blur needs Android 9+, so older phones get a soft halo instead.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                drawIntoCanvas { canvas ->
+                    val oval = android.graphics.RectF(topLeft.x, topLeft.y, topLeft.x + arcSize.width, topLeft.y + arcSize.height)
+                    listOf(18f to 0.35f, 6f to 0.7f).forEach { (blur, alpha) ->
+                        val glow = Paint().apply {
+                            isAntiAlias = true
+                            style = Paint.Style.STROKE
+                            strokeWidth = r(46f)
+                            color = TbColors.Lime.copy(alpha = alpha * blink).toArgb()
+                            maskFilter = BlurMaskFilter(blur * unit, BlurMaskFilter.Blur.NORMAL)
+                        }
+                        canvas.nativeCanvas.drawArc(oval, -90f, sweep, false, glow)
+                    }
+                }
+            } else {
+                drawArc(TbColors.Lime, -90f, sweep, false, topLeft, arcSize, alpha = 0.25f * blink, style = Stroke(width = r(54f)))
+            }
             drawArc(TbColors.Lime, -90f, sweep, false, topLeft, arcSize, alpha = blink, style = Stroke(width = r(46f)))
         }
 

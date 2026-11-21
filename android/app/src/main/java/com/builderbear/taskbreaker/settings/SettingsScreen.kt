@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.builderbear.taskbreaker.ai.ClaudeClient
+import com.builderbear.taskbreaker.ui.FieldShape
 import com.builderbear.taskbreaker.ui.Panel
 import com.builderbear.taskbreaker.ui.PrimaryButton
 import com.builderbear.taskbreaker.ui.ScreenTitle
@@ -58,6 +59,7 @@ fun SettingsScreen() {
                     TextButton(onClick = { show = !show }) { Text(if (show) "Hide" else "Show", color = TbColors.Lime) }
                 },
                 colors = tbFieldColors(),
+                shape = FieldShape,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
