@@ -24,6 +24,10 @@ data class UpcomingState(
     val canNotify: Boolean = true,
     val exactAlarms: Boolean = true,
     val appointments: List<Appointment> = emptyList(),
+    val drives: Map<String, DriveInfo> = emptyMap(), // by Appointment.key
+    val mapsConfigured: Boolean = false,
+    val hasStartPoint: Boolean = false,
+    val updatingDrives: Boolean = false,
 )
 
 /** Shows the next 7 days of appointments, and refreshes by itself when the calendar changes. */
@@ -62,27 +66,41 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Re-reads the calendar and rebuilds the reminder alarms. Reading runs off the main thread. */
+    /**
+     * Re-reads the calendar and rebuilds the reminder alarms, off the main thread, in two steps:
+     * first show the list straight away using saved drive times, then rebuild the schedule (which may
+     * ask Google for fresh drive times, taking a few seconds) and update the page again.
+     */
     fun refresh() {
         watchCalendarIfAllowed()
         viewModelScope.launch {
-            val newState = withContext(Dispatchers.IO) {
-                val now = System.currentTimeMillis()
-                val ids = SettingsStore.calendarIds(context)
-                val status = AppointmentReminders.reschedule(context)
-                if (CalendarRepository.hasPermission(context)) CalendarSyncJob.ensureScheduled(context)
-                UpcomingState(
-                    loaded = true,
-                    hasPermission = CalendarRepository.hasPermission(context),
-                    calendarsChosen = ids.isNotEmpty(),
-                    canNotify = TimerNotifications.canNotify(context),
-                    exactAlarms = status.exactAlarms,
-                    // Start an hour back so an appointment that's under way still shows.
-                    appointments = CalendarRepository.appointments(context, ids, now - 60 * 60_000L, now + 7L * 24 * 60 * 60_000L)
-                        .filter { it.end > now },
-                )
+            _state.value = withContext(Dispatchers.IO) { read(exactAlarms = _state.value.exactAlarms, updating = true) }
+            val status = withContext(Dispatchers.IO) {
+                val s = AppointmentReminders.reschedule(context)
+                CalendarSyncJob.ensureScheduled(context)
+                s
             }
-            _state.value = newState
+            _state.value = withContext(Dispatchers.IO) { read(exactAlarms = status.exactAlarms, updating = false) }
         }
+    }
+
+    private fun read(exactAlarms: Boolean, updating: Boolean): UpcomingState {
+        val now = System.currentTimeMillis()
+        val ids = SettingsStore.calendarIds(context)
+        // Start an hour back so an appointment that's under way still shows.
+        val appointments = CalendarRepository.appointments(context, ids, now - 60 * 60_000L, now + 7L * 24 * 60 * 60_000L)
+            .filter { it.end > now }
+        return UpcomingState(
+            loaded = true,
+            hasPermission = CalendarRepository.hasPermission(context),
+            calendarsChosen = ids.isNotEmpty(),
+            canNotify = TimerNotifications.canNotify(context),
+            exactAlarms = exactAlarms,
+            appointments = appointments,
+            drives = appointments.mapNotNull { a -> DriveTime.cached(context, a)?.let { a.key to it } }.toMap(),
+            mapsConfigured = DriveTime.isConfigured(context),
+            hasStartPoint = SettingsStore.workAddress(context).isNotBlank() || DriveTime.hasLocationPermission(context),
+            updatingDrives = updating && DriveTime.isConfigured(context),
+        )
     }
 }

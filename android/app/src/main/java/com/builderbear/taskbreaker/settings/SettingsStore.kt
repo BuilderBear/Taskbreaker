@@ -18,6 +18,25 @@ object SettingsStore {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_API, key.trim()).apply()
     }
 
+    private const val KEY_MAPS = "google_maps_api_key"
+    private const val KEY_WORK = "work_address"
+
+    /** Google Maps (Routes API) key for drive times. Typed into the app, never stored in code. */
+    fun mapsKey(context: Context): String =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_MAPS, "").orEmpty()
+
+    fun setMapsKey(context: Context, key: String) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_MAPS, key.trim()).commit()
+    }
+
+    /** Where drives start from when the phone's current location isn't available. */
+    fun workAddress(context: Context): String =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_WORK, "").orEmpty()
+
+    fun setWorkAddress(context: Context, address: String) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_WORK, address.trim()).commit()
+    }
+
     private const val KEY_CALENDARS = "watched_calendar_ids"
 
     /** IDs of the phone calendars the owner chose to get appointment reminders from. Empty = none chosen yet. */

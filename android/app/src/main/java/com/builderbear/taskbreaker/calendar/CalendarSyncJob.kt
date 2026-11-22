@@ -22,9 +22,17 @@ import com.builderbear.taskbreaker.timer.TimerAlarm
 class CalendarSyncJob : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
-        AppointmentReminders.reschedule(this)
-        if (params.jobId == CONTENT_JOB) ensureScheduled(this)
-        return false // all done; nothing still running in the background
+        // Jobs also start on the main thread, and rescheduling may look up drive times online,
+        // so do the work on a helper thread and tell Android when it's finished.
+        Thread {
+            try {
+                AppointmentReminders.reschedule(this)
+                if (params.jobId == CONTENT_JOB) ensureScheduled(this)
+            } finally {
+                jobFinished(params, false)
+            }
+        }.start()
+        return true // still working (on the helper thread)
     }
 
     override fun onStopJob(params: JobParameters): Boolean = false
@@ -73,8 +81,10 @@ class CalendarSyncJob : JobService() {
  */
 class RestartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        TimerAlarm.restore(context)
-        AppointmentReminders.reschedule(context)
-        CalendarSyncJob.ensureScheduled(context)
+        TimerAlarm.restore(context) // quick, no network: do it straight away
+        inBackground {
+            AppointmentReminders.reschedule(context)
+            CalendarSyncJob.ensureScheduled(context)
+        }
     }
 }

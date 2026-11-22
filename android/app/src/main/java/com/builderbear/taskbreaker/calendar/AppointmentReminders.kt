@@ -58,10 +58,23 @@ object AppointmentReminders {
         return minOf(byLead, byLeave)
     }
 
+    /** Reminder time using the last saved drive estimate (no network), for showing on screen. */
+    fun reminderTimeFor(context: Context, appointment: Appointment): Long =
+        reminderTime(appointment, DriveTime.cached(context, appointment)?.minutes)
+
+    /** The latest time to set off by car, or null if the drive time isn't known. */
+    fun leaveBy(appointment: Appointment, driveMinutes: Int?): Long? =
+        driveMinutes?.let { appointment.begin - it * 60_000L }
+
     /** What happened when the schedule was rebuilt, so the Upcoming page can say so. */
     data class Status(val scheduled: Int, val exactAlarms: Boolean)
 
-    /** Throws away every appointment alarm we set before and sets fresh ones from the calendar. */
+    /**
+     * Throws away every appointment alarm we set before and sets fresh ones from the calendar.
+     * May ask Google for drive times, so call it off the main thread. @Synchronized makes overlapping
+     * calls (e.g. the background job and the open app at the same moment) take turns instead of clashing.
+     */
+    @Synchronized
     fun reschedule(context: Context): Status {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -80,16 +93,8 @@ object AppointmentReminders {
             .filter { !it.allDay && it.begin > now }
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
         val codes = mutableSetOf<String>()
-        for (appointment in appointments) {
-            val at = reminderTime(appointment)
-            if (at <= now) {
-                // Already inside the reminder window (e.g. the appointment was just added, or the phone
-                // was off). Remind right away instead of not at all.
-                notifyOnce(context, appointment)
-                continue
-            }
-            val code = appointment.key.hashCode()
-            val pending = alarmIntent(context, code, appointment)
+        fun setAlarm(code: Int, at: Long, appointment: Appointment, refresh: Boolean) {
+            val pending = alarmIntent(context, code, appointment, refresh)
             try {
                 if (canExact) alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
                 else alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
@@ -98,14 +103,46 @@ object AppointmentReminders {
             }
             codes += code.toString()
         }
+
+        for (appointment in appointments) {
+            // Phase 2: if there's an address and a Maps key, include the drive time (asks Google if needed).
+            val drive = DriveTime.estimate(context, appointment, now)
+            val at = reminderTime(appointment, drive?.minutes)
+            val code = appointment.key.hashCode()
+            if (at <= now) {
+                // Already inside the reminder window (e.g. the appointment was just added, traffic got
+                // worse, or the phone was off). Remind right away instead of not at all.
+                notifyOnce(context, appointment)
+                continue
+            }
+            setAlarm(code, at, appointment, refresh = false)
+
+            // Extra "recheck" alarms that look up the drive time again with fresh traffic, so the
+            // reminder can move earlier if the roads get worse. They don't show anything themselves.
+            if (appointment.location.isNotBlank() && DriveTime.isConfigured(context)) {
+                if (appointment.begin - now > DriveTime.LOOKAHEAD_MS) {
+                    // Too far ahead to look up yet: recheck once it comes within range.
+                    setAlarm(code + 1, appointment.begin - DriveTime.LOOKAHEAD_MS + 60_000L, appointment, refresh = true)
+                } else {
+                    val recheck30 = at - 30 * 60_000L
+                    val recheck10 = at - 10 * 60_000L
+                    if (recheck30 > now + 60_000L) setAlarm(code + 1, recheck30, appointment, refresh = true)
+                    if (recheck10 > now + 60_000L) setAlarm(code + 2, recheck10, appointment, refresh = true)
+                }
+            }
+        }
         prefs.edit().putStringSet(KEY_SCHEDULED, codes).apply()
-        return Status(scheduled = codes.size, exactAlarms = canExact)
+        return Status(scheduled = appointments.size, exactAlarms = canExact)
     }
 
-    private fun alarmIntent(context: Context, code: Int, appointment: Appointment?): PendingIntent {
+    const val EXTRA_REFRESH = "refresh_only"
+
+    private fun alarmIntent(context: Context, code: Int, appointment: Appointment?, refresh: Boolean = false): PendingIntent {
         val intent = Intent(context, AppointmentAlarmReceiver::class.java)
         if (appointment != null) {
-            intent.putExtra(EXTRA_EVENT_ID, appointment.eventId).putExtra(EXTRA_BEGIN, appointment.begin)
+            intent.putExtra(EXTRA_EVENT_ID, appointment.eventId)
+                .putExtra(EXTRA_BEGIN, appointment.begin)
+                .putExtra(EXTRA_REFRESH, refresh)
         }
         return PendingIntent.getBroadcast(context, code, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
@@ -140,10 +177,31 @@ object AppointmentReminders {
         createChannel(context)
         if (!TimerNotifications.canNotify(context)) return // the Upcoming page warns about this, so it isn't silent
         val code = appointment.key.hashCode()
-        val time = DateFormat.getTimeFormat(context).format(appointment.begin)
-        val minutes = max(0, ((appointment.begin - System.currentTimeMillis()) / 60_000.0).roundToInt())
+        val timeFormat = DateFormat.getTimeFormat(context)
+        val time = timeFormat.format(appointment.begin)
+        val now = System.currentTimeMillis()
+        val minutes = max(0, ((appointment.begin - now) / 60_000.0).roundToInt())
         val whenText = if (minutes <= 0) "Starting now" else "Starts in $minutes min"
-        val text = if (appointment.location.isBlank()) whenText else "$whenText · ${appointment.location}"
+
+        val drive = DriveTime.cached(context, appointment)
+        val driveMinutes = drive?.minutes
+        val leave = leaveBy(appointment, driveMinutes)
+        // When the drive is what sets the reminder time, lead with when to leave.
+        val driveDecides = driveMinutes != null && reminderTime(appointment, driveMinutes) < reminderTime(appointment)
+        val title: String
+        val parts = mutableListOf<String>()
+        if (driveDecides && leave != null) {
+            title = if (leave <= now) "Leave now for ${appointment.title}" else "Leave by ${timeFormat.format(leave)} for ${appointment.title}"
+            parts += "$driveMinutes min drive with traffic"
+            parts += "Starts at $time"
+        } else {
+            title = "${appointment.title} at $time"
+            parts += whenText
+            if (driveMinutes != null) parts += "$driveMinutes min drive"
+        }
+        if (appointment.location.isNotBlank() && DriveTime.isConfigured(context) && driveMinutes == null) parts += "Drive time unknown"
+        if (appointment.location.isNotBlank()) parts += appointment.location
+        val text = parts.joinToString(" · ")
 
         val open = PendingIntent.getActivity(
             context,
@@ -155,7 +213,7 @@ object AppointmentReminders {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_timer)
-            .setContentTitle("${appointment.title} at $time")
+            .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
@@ -181,19 +239,41 @@ object AppointmentReminders {
         )
 }
 
-/** Runs when an appointment's reminder alarm goes off. */
+/**
+ * Runs [work] on a background thread from a BroadcastReceiver. Receivers start on the main thread,
+ * where Android forbids network calls (drive-time lookups). goAsync() keeps the receiver alive
+ * until the work calls finish().
+ */
+internal fun BroadcastReceiver.inBackground(work: () -> Unit) {
+    val pending = goAsync()
+    Thread {
+        try {
+            work()
+        } finally {
+            pending.finish()
+        }
+    }.start()
+}
+
+/** Runs when an appointment's reminder (or traffic recheck) alarm goes off. */
 class AppointmentAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val eventId = intent.getLongExtra(AppointmentReminders.EXTRA_EVENT_ID, -1L)
         val begin = intent.getLongExtra(AppointmentReminders.EXTRA_BEGIN, -1L)
-        // Check the calendar one last time: the appointment may have been moved or deleted since the
-        // alarm was set. Only remind if it's still there at the same time.
-        val now = System.currentTimeMillis()
-        val still = CalendarRepository
-            .appointments(context, SettingsStore.calendarIds(context), now - 60 * 60_000L, now + 24 * 60 * 60_000L)
-            .firstOrNull { it.eventId == eventId && it.begin == begin }
-        if (still != null) AppointmentReminders.notifyOnce(context, still)
-        // Keep the schedule fresh (picks up anything that changed, and the appointments after this one).
-        AppointmentReminders.reschedule(context)
+        val refreshOnly = intent.getBooleanExtra(AppointmentReminders.EXTRA_REFRESH, false)
+        inBackground {
+            if (!refreshOnly) {
+                // Check the calendar one last time: the appointment may have been moved or deleted since
+                // the alarm was set. Only remind if it's still there at the same time.
+                val now = System.currentTimeMillis()
+                val still = CalendarRepository
+                    .appointments(context, SettingsStore.calendarIds(context), now - 60 * 60_000L, now + 24 * 60 * 60_000L)
+                    .firstOrNull { it.eventId == eventId && it.begin == begin }
+                if (still != null) AppointmentReminders.notifyOnce(context, still)
+            }
+            // Rebuild the schedule. For a recheck alarm this looks up the drive again with fresh
+            // traffic, and moves (or immediately sends) the reminder if leaving time got earlier.
+            AppointmentReminders.reschedule(context)
+        }
     }
 }

@@ -12,7 +12,7 @@ Taskbreaker is a personal **native Android app** for daily life management. It b
 | **Focus timer** | Built (Android) | Visual countdown dial. Its own page. |
 | **Breakdown** (task breaker) | Built (Android) | Breaks a big or stuck task into small first steps, using Claude. Its own page. |
 | **Medication reminders** | Not started | Morning and evening reminders. A dose counts as taken only when the owner taps a physical NFC sticker with their phone. |
-| **Upcoming** (appointment reminders) | Phase 1 built | Reads the owner's chosen Google calendars on the phone and reminds them before appointments. Phase 2 (planned): live drive time via Google's Routes API and "leave by" alerts. |
+| **Upcoming** (appointment reminders) | Built (drive times not yet verified with the real key) | Reads the owner's chosen Google calendars on the phone and reminds them before appointments. For appointments with an address, uses live drive time from Google's Routes API for "leave by" alerts. |
 | **Visual planner** | Not started | Calendar view in the style of Google Calendar, ideally synced with Google Calendar. |
 
 Out of scope for now: finding misplaced items ("where's my stuff").
@@ -59,6 +59,16 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
   - `CalendarSyncJob` (JobScheduler, no extra library) reruns the schedule when the calendar changes, even with the app closed, plus every 6 hours.
   - `RestartReceiver` puts back appointment alarms *and* a running focus timer after a reboot, app update, or clock/time-zone change.
   - Notifications have a **Navigate** action: a plain Google Maps directions link, free with no API key.
+- **Drive times** (`calendar/DriveTime.kt`):
+  - Calls Google's **Routes API** (`computeRoutes`, `TRAFFIC_AWARE`, departure time = expected leave time) over plain HTTPS (`HttpURLConnection` + `org.json`, no extra library).
+  - The Maps key is typed into Settings on the phone (`SettingsStore.mapsKey`). It's never in code, git, or chat. In Google Cloud it's restricted to the Routes API and to Android app `com.builderbear.taskbreaker` + this PC's debug-key SHA-1, so requests send `X-Android-Package` and `X-Android-Cert` headers.
+  - **Starting point:** the phone's last known location if location permission was given (foreground only, never "all the time"), otherwise the owner's **work address** from Settings (`SettingsStore.workAddress`). The owner chose work, not home.
+  - **What's sent to Google** (the owner agreed): the appointment's address and the starting point.
+  - Only appointments within 12 hours get lookups. Results are cached in the `drive_times` prefs for 2 h, or 10 min when close to leaving or after a failure. Changing the key, work address or location access calls `DriveTime.clearCache`.
+  - **Reminder rule:** remind at the earlier of 20 min before the start, or 15 min before the leave-by time (`AppointmentReminders.reminderTime`). Recheck alarms 30 and 10 min before the planned reminder fetch fresh traffic and can move the reminder earlier.
+  - A failed lookup never stops a reminder: it falls back to the 20-minute rule (or the last good drive time) and shows the reason on the Upcoming page.
+  - Google reports an invalid key as HTTP **400** with "API key not valid", not 403.
+  - **Threading:** `reschedule()` can use the network, so it must never run on the main thread. Receivers use `inBackground {}` (goAsync + thread), and `CalendarSyncJob` works on a thread and calls `jobFinished`.
 - **Timer reliability:** a running timer stores its finish time, not a tick count. When it starts, `TimerAlarm` also schedules a system alarm (`AlarmManager.setAlarmClock`), so the "time's up" notification fires even if the app is closed or the phone is asleep. If notifications are off or only an inexact alarm is allowed, the timer screen shows a magenta warning. Alarms are lost if the phone reboots. That's fine for the timer, but medication reminders must handle it.
 - **Breakdown AI:** `ClaudeClient` calls the Claude API with the official Anthropic Java SDK (`com.anthropic:anthropic-java`), model `claude-haiku-5-5` (fast and cheap) at low effort. The owner types their own API key into Settings. It's stored only on the phone and kept out of backups (`allowBackup="false"`). Only the task text is sent. With no key, or on any error, the screen shows a plain message and adding steps by hand still works.
 

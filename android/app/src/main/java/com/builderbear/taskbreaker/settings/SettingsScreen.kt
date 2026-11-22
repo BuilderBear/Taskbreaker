@@ -36,6 +36,7 @@ import com.builderbear.taskbreaker.calendar.AppointmentReminders
 import com.builderbear.taskbreaker.calendar.CalendarRepository
 import com.builderbear.taskbreaker.calendar.CalendarSyncJob
 import com.builderbear.taskbreaker.calendar.DeviceCalendar
+import com.builderbear.taskbreaker.calendar.DriveTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -66,9 +67,11 @@ fun SettingsScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenTitle("Settings", "Choose calendars for reminders, and set up the AI for Break it down.")
+        ScreenTitle("Settings", "Choose calendars for reminders, set up drive times, and set up the AI for Break it down.")
 
         CalendarPicker()
+
+        DriveSettings()
 
         Panel {
             SectionLabel("Claude API key")
@@ -205,6 +208,128 @@ private fun CalendarPicker() {
                 "Your calendar is only read on this phone; nothing is sent anywhere.",
             color = if (chosen.isEmpty()) TbColors.Hot else TbColors.Muted,
             fontSize = 15.sp,
+        )
+    }
+}
+
+/**
+ * Phase 2 settings: the Google Maps key, the work address drives start from when the phone's
+ * location isn't available, and the optional "use my current location" permission.
+ * Saving anything rebuilds the reminder schedule so the new drive times take effect.
+ */
+@Composable
+private fun DriveSettings() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var savedKey by remember { mutableStateOf(SettingsStore.mapsKey(context)) }
+    var keyDraft by remember { mutableStateOf(savedKey) }
+    var showKey by remember { mutableStateOf(false) }
+    var savedWork by remember { mutableStateOf(SettingsStore.workAddress(context)) }
+    var workDraft by remember { mutableStateOf(savedWork) }
+    var hasLocation by remember { mutableStateOf(DriveTime.hasLocationPermission(context)) }
+    LifecycleResumeEffect(Unit) {
+        hasLocation = DriveTime.hasLocationPermission(context)
+        onPauseOrDispose { }
+    }
+    // Settings changed: forget old drive answers (and errors), then rebuild reminders with the new settings.
+    fun rebuild() {
+        scope.launch(Dispatchers.IO) {
+            DriveTime.clearCache(context)
+            AppointmentReminders.reschedule(context)
+        }
+    }
+
+    val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        hasLocation = DriveTime.hasLocationPermission(context)
+        rebuild()
+    }
+
+    Panel {
+        SectionLabel("Drive time (Google Maps)")
+        Text(
+            "For appointments with an address, Taskbreaker works out the drive with live traffic and " +
+                "reminds you ${AppointmentReminders.LEAVE_BUFFER_MINUTES} min before you need to leave.",
+            color = TbColors.Muted,
+            fontSize = 15.sp,
+        )
+
+        Text("Google Maps API key", color = TbColors.Ink)
+        OutlinedTextField(
+            value = keyDraft,
+            onValueChange = { keyDraft = it },
+            placeholder = { Text("AIza…") },
+            singleLine = true,
+            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show", color = TbColors.Lime) }
+            },
+            colors = tbFieldColors(),
+            shape = FieldShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PrimaryButton("Save key", onClick = {
+                SettingsStore.setMapsKey(context, keyDraft)
+                savedKey = keyDraft.trim()
+                keyDraft = savedKey
+                rebuild()
+            })
+            SecondaryButton("Remove", onClick = {
+                SettingsStore.setMapsKey(context, "")
+                savedKey = ""
+                keyDraft = ""
+                rebuild()
+            })
+        }
+
+        Text("Work address", color = TbColors.Ink)
+        Text(
+            "Drives start here when your phone's location isn't available (which is most of the time when the app is closed).",
+            color = TbColors.Muted,
+            fontSize = 14.sp,
+            lineHeight = 19.sp,
+        )
+        OutlinedTextField(
+            value = workDraft,
+            onValueChange = { workDraft = it },
+            placeholder = { Text("e.g. 123 Main St, Springfield") },
+            colors = tbFieldColors(),
+            shape = FieldShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SecondaryButton("Save work address", onClick = {
+            SettingsStore.setWorkAddress(context, workDraft)
+            savedWork = workDraft.trim()
+            workDraft = savedWork
+            rebuild()
+        })
+
+        if (hasLocation) {
+            Text("Using your current location when it's available.", color = TbColors.Lime, fontSize = 15.sp)
+        } else {
+            SecondaryButton("Use my current location", onClick = {
+                askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            })
+        }
+
+        // Status: what works and what's missing, in one line.
+        val status = when {
+            savedKey.isBlank() -> "No Maps key saved, so reminders use the plain ${AppointmentReminders.LEAD_MINUTES}-minute rule."
+            savedWork.isBlank() && !hasLocation -> "Add your work address (or allow location) so drives have a starting point."
+            else -> null
+        }
+        if (status != null) {
+            Text(status, color = TbColors.Hot, fontSize = 15.sp)
+        } else {
+            // Set up isn't the same as working: the Upcoming page shows whether Google accepted the key.
+            Text("Drive times are set up. The Upcoming page shows each drive, or what went wrong.", color = TbColors.Lime, fontSize = 15.sp)
+        }
+        Text(
+            "To work out a drive, the appointment's address and your starting point (current location or work " +
+                "address) are sent to Google with your key. Requests count toward your Google Cloud account.",
+            color = TbColors.Faint,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
         )
     }
 }

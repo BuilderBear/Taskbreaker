@@ -78,7 +78,11 @@ fun UpcomingScreen(vm: UpcomingViewModel, onChooseCalendars: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenTitle("Upcoming", "Your next appointments. You'll get a reminder ${AppointmentReminders.LEAD_MINUTES} min before each one.")
+        ScreenTitle(
+            "Upcoming",
+            "Your next appointments. You'll get a reminder ${AppointmentReminders.LEAD_MINUTES} min before each one, " +
+                "or ${AppointmentReminders.LEAVE_BUFFER_MINUTES} min before you need to leave if that's earlier.",
+        )
 
         if (!s.loaded) return@Column
 
@@ -110,6 +114,13 @@ fun UpcomingScreen(vm: UpcomingViewModel, onChooseCalendars: () -> Unit) {
         } else if (!s.exactAlarms) {
             Warning("Android only allows approximate alarms right now, so reminders may arrive a few minutes late.")
         }
+        if (s.mapsConfigured && !s.hasStartPoint) {
+            Warning(
+                "Drive times need a starting point. Add your work address in Settings (or allow location).",
+                action = "Open settings",
+                onAction = onChooseCalendars,
+            )
+        }
 
         if (!s.hasPermission || !s.calendarsChosen) return@Column
 
@@ -124,7 +135,7 @@ fun UpcomingScreen(vm: UpcomingViewModel, onChooseCalendars: () -> Unit) {
 
         // The next appointment that has a start time gets the big glowing card.
         val next = list.firstOrNull { !it.allDay && it.begin > now } ?: list.first()
-        NextUpCard(next, now)
+        NextUpCard(next, now, s)
 
         // Everything else, grouped by day.
         val rest = list.filter { it !== next }
@@ -138,7 +149,7 @@ fun UpcomingScreen(vm: UpcomingViewModel, onChooseCalendars: () -> Unit) {
                         SectionLabel(day, color = TbColors.Lime)
                         lastDay = day
                     }
-                    AppointmentRow(context, a)
+                    AppointmentRow(context, a, s.drives[a.key])
                 }
             }
         }
@@ -146,7 +157,7 @@ fun UpcomingScreen(vm: UpcomingViewModel, onChooseCalendars: () -> Unit) {
 }
 
 @Composable
-private fun NextUpCard(a: Appointment, now: Long) {
+private fun NextUpCard(a: Appointment, now: Long, s: UpcomingState) {
     val context = LocalContext.current
     Panel(borderColor = TbColors.Lime2, accent = true) {
         val untilText = when {
@@ -164,9 +175,32 @@ private fun NextUpCard(a: Appointment, now: Long) {
         Text(a.title, color = TbColors.Ink, style = TbType.objective)
         Text(timeRange(context, a, now), color = TbColors.Ink, fontFamily = ChakraPetch, fontSize = 16.sp)
         if (a.location.isNotBlank()) Text(a.location, color = TbColors.Muted)
+        val fmt = DateFormat.getTimeFormat(context)
+        val drive = s.drives[a.key]
+        if (!a.allDay && a.begin > now && a.location.isNotBlank()) {
+            // Drive line: "22 min drive from work · Leave by 2:08 PM", or why it's unknown.
+            when {
+                !s.mapsConfigured -> Text("Add a Google Maps key in Settings to get leave-by times.", color = TbColors.Faint, fontSize = 14.sp)
+                drive?.minutes != null -> {
+                    val leave = AppointmentReminders.leaveBy(a, drive.minutes)!!
+                    val leaveText = if (leave <= now) "Leave now" else "Leave by " + fmt.format(leave)
+                    Text(
+                        "${drive.minutes} min drive from ${drive.from} · $leaveText",
+                        color = TbColors.Lime,
+                        fontFamily = ChakraPetch,
+                        fontSize = 16.sp,
+                    )
+                    // A lookup that failed after an earlier one worked: say we're using the older number.
+                    drive.error?.let { Text("Using the last known drive time. $it", color = TbColors.Hot, fontSize = 14.sp, lineHeight = 19.sp) }
+                }
+                drive?.error != null -> Text("Drive time unknown: ${drive.error}", color = TbColors.Hot, fontSize = 14.sp, lineHeight = 19.sp)
+                s.updatingDrives -> Text("Checking drive time…", color = TbColors.Muted, fontSize = 14.sp)
+                a.begin - now > DriveTime.LOOKAHEAD_MS -> Text("Drive time will be checked closer to the day.", color = TbColors.Faint, fontSize = 14.sp)
+            }
+        }
         if (!a.allDay && a.begin > now) {
-            val reminder = AppointmentReminders.reminderTime(a)
-            val reminderText = if (reminder <= now) "Reminder sent" else "Reminder at " + DateFormat.getTimeFormat(context).format(reminder)
+            val reminder = AppointmentReminders.reminderTime(a, drive?.minutes)
+            val reminderText = if (reminder <= now) "Reminder sent" else "Reminder at " + fmt.format(reminder)
             SectionLabel(reminderText, color = TbColors.Lime2)
         }
         if (a.location.isNotBlank()) {
@@ -176,7 +210,7 @@ private fun NextUpCard(a: Appointment, now: Long) {
 }
 
 @Composable
-private fun AppointmentRow(context: Context, a: Appointment) {
+private fun AppointmentRow(context: Context, a: Appointment, drive: DriveInfo?) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.Top,
@@ -193,6 +227,18 @@ private fun AppointmentRow(context: Context, a: Appointment) {
             )
             Text(a.title, color = TbColors.Ink, fontSize = 17.sp)
             if (a.location.isNotBlank()) Text(a.location, color = TbColors.Muted, fontSize = 14.sp, lineHeight = 19.sp)
+            val m = drive?.minutes
+            if (m != null) {
+                val leave = AppointmentReminders.leaveBy(a, m)!!
+                Text(
+                    "$m min drive · leave by ${DateFormat.getTimeFormat(context).format(leave)}",
+                    color = TbColors.Lime2,
+                    fontFamily = ChakraPetch,
+                    fontSize = 13.sp,
+                )
+            } else if (drive?.error != null) {
+                Text("Drive time unknown: ${drive.error}", color = TbColors.Hot, fontSize = 13.sp, lineHeight = 18.sp)
+            }
         }
         if (a.location.isNotBlank()) {
             SecondaryButton("Go", onClick = { context.startActivity(AppointmentReminders.mapsDirections(a.location)) }, compact = true)

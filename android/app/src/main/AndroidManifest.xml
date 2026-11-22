@@ -15,6 +15,10 @@
         android:maxSdkVersion="32" />
     <!-- Read (never change) the calendars synced to the phone, for appointment reminders. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Optional: start drive-time estimates from where the phone is (only while the app is in use).
+         Without it, drives start from the home address set in Settings. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Lets the app put its alarms back after the phone restarts. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
