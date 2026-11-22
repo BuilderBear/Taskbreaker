@@ -14,8 +14,8 @@ android {
         minSdk = 26 // Android 8.0. Covers practically every phone still in use.
         targetSdk = 36
         // Bump both for every release. versionCode must go up by at least 1, or the phone won't install the update.
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
 
     buildTypes {
