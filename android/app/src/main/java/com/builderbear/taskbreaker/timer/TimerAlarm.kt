@@ -60,6 +60,16 @@ object TimerAlarm {
         return false
     }
 
+    /**
+     * After a phone restart: if a timer was running and hasn't finished, set its alarm again.
+     * Reads the same saved values TimerViewModel writes ("timer" file, keys endAt and label).
+     */
+    fun restore(context: Context) {
+        val prefs = context.getSharedPreferences("timer", Context.MODE_PRIVATE)
+        val endAt = prefs.getLong("endAt", 0L)
+        if (endAt > System.currentTimeMillis()) schedule(context, endAt, prefs.getString("label", "").orEmpty())
+    }
+
     fun cancel(context: Context) {
         // PendingIntents match on their target, not their extras, so an empty label finds the scheduled one.
         context.getSystemService(AlarmManager::class.java).cancel(alarmIntent(context, ""))

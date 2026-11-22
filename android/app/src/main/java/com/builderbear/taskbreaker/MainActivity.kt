@@ -1,5 +1,6 @@
 package com.builderbear.taskbreaker
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -23,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,8 +41,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.builderbear.taskbreaker.breakdown.BreakdownScreen
+import com.builderbear.taskbreaker.calendar.AppointmentReminders
+import com.builderbear.taskbreaker.calendar.CalendarRepository
+import com.builderbear.taskbreaker.calendar.CalendarSyncJob
+import com.builderbear.taskbreaker.calendar.UpcomingScreen
+import com.builderbear.taskbreaker.calendar.UpcomingViewModel
 import com.builderbear.taskbreaker.breakdown.BreakdownViewModel
 import com.builderbear.taskbreaker.settings.SettingsScreen
 import com.builderbear.taskbreaker.timer.TimerNotifications
@@ -56,7 +64,9 @@ import com.builderbear.taskbreaker.ui.TbType
 import com.builderbear.taskbreaker.ui.hudBackground
 import com.builderbear.taskbreaker.ui.hudShape
 import com.builderbear.taskbreaker.ui.limeGlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The app's single screen container. Each tool is a "page" shown inside it. */
 class MainActivity : ComponentActivity() {
@@ -68,13 +78,35 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         TimerNotifications.createChannel(this)
-        setContent { TaskbreakerTheme { TaskbreakerApp() } }
+        AppointmentReminders.createChannel(this)
+        requestedPage.value = intent?.getStringExtra(EXTRA_PAGE)
+        // Make sure appointment reminders are scheduled and the calendar-change job is set up.
+        lifecycleScope.launch(Dispatchers.IO) {
+            AppointmentReminders.reschedule(this@MainActivity)
+            if (CalendarRepository.hasPermission(this@MainActivity)) CalendarSyncJob.ensureScheduled(this@MainActivity)
+        }
+        setContent { TaskbreakerTheme { TaskbreakerApp(requestedPage) } }
+    }
+
+    // Tapping a reminder notification while the app is already open arrives here.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        requestedPage.value = intent.getStringExtra(EXTRA_PAGE)
+    }
+
+    /** A page a notification asked to open (e.g. "upcoming"), or null. */
+    private val requestedPage = mutableStateOf<String?>(null)
+
+    companion object {
+        const val EXTRA_PAGE = "page"
+        const val PAGE_UPCOMING = "upcoming"
     }
 }
 
 private enum class Page(val label: String) {
     TIMER("Timer"),
     BREAKDOWN("Breakdown"),
+    UPCOMING("Upcoming"),
     SETTINGS("Settings"),
 }
 
@@ -82,11 +114,18 @@ private enum class Page(val label: String) {
 private val BarColor = TbColors.Bg.copy(alpha = 0.88f)
 
 @Composable
-private fun TaskbreakerApp() {
-    // Both ViewModels live as long as the app screen does, so the two pages can talk to each other.
+private fun TaskbreakerApp(requestedPage: MutableState<String?>) {
+    // The ViewModels live as long as the app screen does, so pages can talk to each other.
     val timerVm: TimerViewModel = viewModel()
     val breakdownVm: BreakdownViewModel = viewModel()
+    val upcomingVm: UpcomingViewModel = viewModel()
     var page by rememberSaveable { mutableStateOf(Page.TIMER) }
+
+    // A tapped appointment reminder opens the Upcoming page.
+    LaunchedEffect(requestedPage.value) {
+        if (requestedPage.value == MainActivity.PAGE_UPCOMING) page = Page.UPCOMING
+        requestedPage.value = null
+    }
 
     // Background (grid + glow) underneath, the app in the middle, scanlines on top.
     Box(Modifier.fillMaxSize().hudBackground()) {
@@ -115,6 +154,7 @@ private fun TaskbreakerApp() {
                             page = Page.TIMER
                         },
                     )
+                    Page.UPCOMING -> UpcomingScreen(vm = upcomingVm, onChooseCalendars = { page = Page.SETTINGS })
                     Page.SETTINGS -> SettingsScreen()
                 }
             }
@@ -159,13 +199,14 @@ private fun TabBar(page: Page, onSelect: (Page) -> Unit, timerVm: TimerViewModel
     Column(Modifier.fillMaxWidth().background(BarColor).navigationBarsPadding()) {
         HorizontalDivider(color = TbColors.Line)
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Page.entries.forEach { p ->
-                val mini = if (p == Page.TIMER && timer.running) " " + formatTime(timer.remainingAt(now)) else ""
+                // Four tabs share the width, so a running timer shows just its countdown in place of "Timer".
+                val text = if (p == Page.TIMER && timer.running) formatTime(timer.remainingAt(now)) else p.label
                 HudTab(
-                    text = p.label + mini,
+                    text = text,
                     selected = page == p,
                     onClick = { onSelect(p) },
                     modifier = Modifier.weight(1f),
@@ -193,8 +234,8 @@ private fun HudTab(text: String, selected: Boolean, onClick: () -> Unit, modifie
             color = if (selected) Color.Black else TbColors.Muted,
             fontFamily = ChakraPetch,
             fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            letterSpacing = 0.08.em,
+            fontSize = 12.sp,
+            letterSpacing = 0.04.em,
             maxLines = 1,
         )
     }

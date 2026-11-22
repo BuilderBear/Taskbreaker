@@ -12,6 +12,7 @@ Taskbreaker is a personal **native Android app** for daily life management. It b
 | **Focus timer** | Built (Android) | Visual countdown dial. Its own page. |
 | **Breakdown** (task breaker) | Built (Android) | Breaks a big or stuck task into small first steps, using Claude. Its own page. |
 | **Medication reminders** | Not started | Morning and evening reminders. A dose counts as taken only when the owner taps a physical NFC sticker with their phone. |
+| **Upcoming** (appointment reminders) | Phase 1 built | Reads the owner's chosen Google calendars on the phone and reminds them before appointments. Phase 2 (planned): live drive time via Google's Routes API and "leave by" alerts. |
 | **Visual planner** | Not started | Calendar view in the style of Google Calendar, ideally synced with Google Calendar. |
 
 Out of scope for now: finding misplaced items ("where's my stuff").
@@ -33,7 +34,8 @@ android/                      The Android app (open this folder in Android Studi
     MainActivity.kt           App container: top bar, bottom tabs, switches pages
     ui/Theme.kt               ALL colors and shapes (TbColors)
     ui/Components.kt          Shared buttons, cards, headings, text-field colors
-    timer/                    Focus timer: screen, ViewModel, system alarm + notification
+    timer/                    Focus timer: screen, dial, ViewModel, system alarm + notification
+    calendar/                 Upcoming page, calendar reading, appointment reminders, background job, restart handling
     breakdown/                Breakdown: screen, ViewModel, Step data
     ai/ClaudeClient.kt        The Claude API call and its prompt
     settings/                 Settings screen and API-key storage
@@ -43,10 +45,20 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
 ## How the Android app works
 
 - **Language and UI:** Kotlin with Jetpack Compose (screens are written as Kotlin functions marked `@Composable`).
-- **Pages:** three bottom tabs (Timer, Breakdown, Settings), switched by the `page` variable in `MainActivity.kt`. No navigation library.
+- **Pages:** four bottom tabs (Timer, Breakdown, Upcoming, Settings), switched by the `page` variable in `MainActivity.kt`. No navigation library.
 - **ViewModels** (`TimerViewModel`, `BreakdownViewModel`) hold each page's data and logic. Screens only display state and call ViewModel functions.
 - **Saved data:** Android `SharedPreferences` (small private key-value files on the phone), one file per feature: `timer`, `breakdown` (steps stored as JSON text) and `settings` (the API key). Nothing is sent anywhere, except the Claude call below.
 - **Timer dial** (`timer/TimerDial.kt`): one lap = 60 minutes. Longer timers (up to 12 hours, `TimerViewModel.MAX_MINUTES`) wrap around, and each extra hour is drawn on top in a lighter green (`limeLayer(hour)` in `ui/Theme.kt`). When the timer isn't running, dragging around the dial sets the time: the edge jumps to the finger, each clockwise lap past 12 o'clock adds an hour, and the time snaps to whole minutes. It's saved when the finger lifts. Dragging is ignored while running so a stray touch can't change a countdown.
+- **Appointment reminders** (`calendar/`):
+  - `CalendarRepository` reads Android's Calendar Provider, the copy of Google Calendar the phone already syncs. There's no Google sign-in or API, and nothing leaves the phone. Needs the `READ_CALENDAR` permission. Every read checks it first, because newer Android crashes the app if you touch calendar data (even just registering a change observer) without it.
+  - The owner picks which calendars to watch in Settings (`SettingsStore.calendarIds`).
+  - `AppointmentReminders.reschedule()` throws away all appointment alarms and sets fresh ones for the next 3 days. It's called whenever anything may have changed: app start, Upcoming page refresh, calendar picker change, a reminder firing, the background job, and restarts.
+  - Reminder time is `reminderTime()`: the earlier of 20 min before the start, or (Phase 2, once drive time is known) 15 min before the leave-by time. All-day events show on the page but get no reminder.
+  - An appointment already inside its reminder window is reminded right away. `notifyOnce` remembers what was shown so rebuilds don't duplicate it.
+  - Just before showing a reminder, `AppointmentAlarmReceiver` re-reads the calendar, so moved or deleted appointments never get a stale alert.
+  - `CalendarSyncJob` (JobScheduler, no extra library) reruns the schedule when the calendar changes, even with the app closed, plus every 6 hours.
+  - `RestartReceiver` puts back appointment alarms *and* a running focus timer after a reboot, app update, or clock/time-zone change.
+  - Notifications have a **Navigate** action: a plain Google Maps directions link, free with no API key.
 - **Timer reliability:** a running timer stores its finish time, not a tick count. When it starts, `TimerAlarm` also schedules a system alarm (`AlarmManager.setAlarmClock`), so the "time's up" notification fires even if the app is closed or the phone is asleep. If notifications are off or only an inexact alarm is allowed, the timer screen shows a magenta warning. Alarms are lost if the phone reboots. That's fine for the timer, but medication reminders must handle it.
 - **Breakdown AI:** `ClaudeClient` calls the Claude API with the official Anthropic Java SDK (`com.anthropic:anthropic-java`), model `claude-haiku-5-5` (fast and cheap) at low effort. The owner types their own API key into Settings. It's stored only on the phone and kept out of backups (`allowBackup="false"`). Only the task text is sent. With no key, or on any error, the screen shows a plain message and adding steps by hand still works.
 
@@ -106,7 +118,7 @@ web/taskbreaker.html          The original single-file web prototype, kept for r
 3. **Make small, focused changes.** One feature or fix at a time, so each one is easy to review and undo.
 4. **Reminders must be reliable.** Missed medication reminders are the worst failure mode.
    - Handle errors visibly, never silently. If notifications, exact alarms or NFC aren't available, tell the user clearly on screen (see the timer's warning banner for the pattern).
-   - Use system alarms (`AlarmManager`), not in-app timers, and re-schedule after a reboot (`BOOT_COMPLETED`) before calling reminders done.
+   - Use system alarms (`AlarmManager`), not in-app timers, and re-schedule after a reboot. `calendar/RestartReceiver` already does this for the timer and appointments; add medication alarms there too.
 5. **Privacy:** medication data is personal. Store as little as needed and don't send it to third-party services (including AI APIs) without asking.
 6. **Don't break the fallbacks.** Every feature that depends on something that can be missing or fail (NFC, notifications, AI, network) must still leave the owner a working manual path.
 7. After each change, summarize: what changed, which files were touched, how to test it, and anything the owner should learn from it.

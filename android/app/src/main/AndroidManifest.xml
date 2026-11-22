@@ -13,6 +13,10 @@
     <uses-permission
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32" />
+    <!-- Read (never change) the calendars synced to the phone, for appointment reminders. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Lets the app put its alarms back after the phone restarts. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- allowBackup=false keeps the saved API key out of Google's automatic cloud backups. -->
     <application
@@ -38,5 +42,29 @@
         <receiver
             android:name=".timer.TimerAlarmReceiver"
             android:exported="false" />
+
+        <!-- Woken up by the system alarm when it's time to remind about an appointment. -->
+        <receiver
+            android:name=".calendar.AppointmentAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Puts alarms back after a restart, an app update, or a clock/time-zone change.
+             exported=true is required to hear these system messages; only Android can send them. -->
+        <receiver
+            android:name=".calendar.RestartReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Background job that refreshes appointment reminders when the calendar changes. -->
+        <service
+            android:name=".calendar.CalendarSyncJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>
